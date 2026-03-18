@@ -1,0 +1,48 @@
+# Code Composer Studio (CCS) specific files
+Debug/
+Release/
+.launches/
+.settings/
+.ccsproject
+.cproject
+.project
+targetConfigs/
+
+# Build artifacts
+*.out
+*.obj
+*.o
+*.elf
+*.hex
+*.map
+*.lst
+*.d
+*.pp
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE specific
+*.launch
+.metadata/
+
+# Keep these important files
+!*.c
+!*.h
+!*.ld
+!*.cmd
+!*.cfg
+!README.md
+!.gitignore
