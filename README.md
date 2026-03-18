@@ -1,290 +1,418 @@
-# ENGR-2350 Lab 5 - Autonomous Navigation Robot
+# ENGR-2350 Lab 5 - Gesture RC Car
 
-An autonomous navigation system for the TI-RSLK robot using ultrasonic ranging and encoder-based turning control.
+A multi-part lab implementing gesture-based control and autonomous navigation for the TI-RSLK robot using I2C sensors.
 
 ## Project Overview
 
-This lab implements an autonomous robot that navigates through an environment by:
-- Detecting obstacles using an ultrasonic range sensor
-- Making intelligent turning decisions to avoid collisions
-- Using encoder feedback for precise turn angle control
-- Alternating turn directions to explore the environment systematically
+This lab is divided into three parts:
 
-## Hardware Requirements
+- **Part A & B**: Gesture control using CMPS12 compass sensor with two control modes
+- **Part C**: Autonomous navigation using ultrasonic ranging
+
+## Repository Structure
+
+```
+Lab5/
+├── PartA_B_GestureControl.c    # Gesture-based RC control (compass)
+├── PartC_AutonomousNav.c       # Autonomous navigation (ultrasonic)
+├── engr2350_mspm0.h            # Hardware abstraction library (if included)
+├── README.md                   # This file
+└── .gitignore                  # Git ignore rules
+```
+
+---
+
+# Part A & B: Gesture RC Car
+
+Control the robot using hand movements detected by a CMPS12 electronic compass.
+
+## Hardware Requirements (Parts A & B)
 
 - TI-RSLK Robotic Car
-- MSPM0G3507 microcontroller
+- CMPS12 Electronic Compass (I2C address: 0x60)
 - SRF08 Ultrasonic Ranger (I2C address: 0x70)
-- CMPS12 Electronic Compass (optional, I2C capable)
-- Rotary encoders on both wheels
-- Push button (BMP1) for start trigger
+- Slide switch for mode selection
+- Long wires (~1m) for hand-held compass module
 
 ## Features
 
-### 1. Ultrasonic Collision Avoidance
-- Continuously monitors distance to obstacles
-- Triggers avoidance behavior when object detected within 25 cm
-- Non-blocking range measurements
+### Part A: Roll/Pitch Control
+- **Pitch** (tilt forward/back) controls speed
+  - Forward tilt → speed up
+  - Backward tilt → slow down/reverse
+- **Roll** (tilt left/right) controls turning
+  - Left tilt → turn left
+  - Right tilt → turn right
+- **Collision avoidance**: Stops if obstacle within 25 cm
 
-### 2. Intelligent Turn Strategy
-- Alternates between left and right turns
-- Performs 2 turns in one direction before switching
-- Adjustable turn angle (default: 60°)
-- Increases turn sharpness after 2 consecutive turns in same direction
+### Part B: Heading-Based PD Control  
+- **Pitch** still controls speed
+- **Compass heading** controls direction using PD control
+  - Rotate hand-held compass → robot turns to match heading
+  - Uses encoder-based relative heading measurement
+  - PD control ensures smooth turning without oscillation
 
-### 3. Encoder-Based Turn Control
-- Calculates precise turn angles using wheel encoders
-- Accounts for wheel base geometry (149 mm)
-- Uses arc length calculations for accurate rotations
-- No compass required for basic operation
+### Mode Selection
+- Slide switch toggles between Part A (roll) and Part B (heading) control
+- LED or serial output indicates current mode
 
-### 4. Dual-Wheel Speed Control
-- Independent integral control for each wheel
-- 6-sample averaging for stable speed measurements
-- Automatic PWM adjustment to maintain target speed
-- Prevents wheel speed drift during straight-line motion
-
-## Control Specifications
+## Control Specifications (Parts A & B)
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Range Limit | 25 cm | Obstacle detection threshold |
-| Turn Angle | 60° | Default turn magnitude (±5° adjustment) |
-| Wheel Base | 149 mm | Distance between wheel centers |
-| Wheel Radius | 35 mm | Radius of drive wheels |
-| PWM Period | 1000 counts | 32 kHz PWM frequency |
-| Turn PWM | 300 | PWM value during turns (30% duty cycle) |
-| Speed Setpoint | 80,000 counts | Target encoder period (≈25% speed) |
-| Encoder Ticks | 360 per revolution | Encoder resolution |
+| Max Speed | 90% | Maximum duty cycle |
+| Min Speed | 15% | Below this, motors stop |
+| Dead Zone (Pitch) | ±5° | No speed change in this range |
+| Dead Zone (Roll) | ±5° | Drive straight in this range |
+| Collision Range | 25 cm | Auto-stop distance |
+| Update Rate | 100 ms | Control loop period |
+| Kp (Heading) | 0.03 | Proportional gain (tuned) |
+| Kd (Heading) | 0.001 | Derivative gain (tuned) |
+| Wheel Base | 149 mm | Distance between wheels |
+| Encoder Resolution | 0.611 mm/count | Distance per encoder tick |
 
-## Pin Configuration
+## Pin Configuration (Parts A & B)
 
-### I2C (Ultrasonic Ranger)
+### I2C Sensors
 - **PA15**: I2C1 SDA (open-drain with pull-up)
 - **PA16**: I2C1 SCL (open-drain with pull-up)
-- **I2C Clock**: 100 kHz
+- **CMPS12 Address**: 0x60
 - **SRF08 Address**: 0x70
+
+### Mode Selection
+- **PA18**: Slide switch (LOW=Roll control, HIGH=Heading control)
 
 ### Motor Control
 - **PB15**: Left motor enable
 - **PB16**: Right motor enable
-- **PB8**: Left motor direction
-- **PB0**: Right motor direction
+- **PB0**: Left motor direction
+- **PB8**: Right motor direction
 
-### PWM Outputs (32 kHz)
-- **PB7 (TIMG8_CCR1)**: Left motor PWM
-- **PB6 (TIMG8_CCR0)**: Right motor PWM
+### PWM & Encoders
+- **PB7**: Left motor PWM
+- **PB6**: Right motor PWM
+- **PB10**: Left encoder
+- **PB11**: Right encoder
 
-### Encoder Inputs
-- **PB10 (TIMG0_CCR0)**: Left wheel encoder
-- **PB11 (TIMG0_CCR1)**: Right wheel encoder
-- **Edge Trigger**: Rising edge
-- **Max Period**: 65,535 counts (overflow tracking enabled)
-
-### User Input
-- **PA7**: BMP1 button (start trigger, pull-up enabled)
-- **PA18**: Mode selection switch (reserved, pull-up enabled)
-
-## Operation Algorithm
-
-### Startup Sequence
-1. System initialization (GPIO, timers, I2C)
-2. Wait for BMP1 button press
-3. Set initial PWM values (80% duty cycle)
-4. Configure forward direction
-5. Take initial range measurement
-6. Begin autonomous navigation
-
-### Navigation Loop
-```
-While forever:
-    1. Read ultrasonic range
-    2. Drive forward (both motors enabled)
-    
-    3. If obstacle detected (range < 25 cm):
-        a. Stop motors
-        b. Check turn counter
-        c. If 2 turns completed in current direction:
-           - Reverse turn direction
-           - Increase turn sharpness by 5°
-           - Reset turn counter
-        d. Pause 100ms
-        e. Execute turn (calculated angle)
-        f. Pause 1.5 seconds
-        g. Increment turn counter
-    
-    4. Display status (range, PWM, turn direction)
-    5. Update every 100ms
-```
-
-### Turn Execution Algorithm
-```c
-turn(int16_t turnDegrees):
-    1. Calculate target encoder counts:
-       arcLength = (π × wheelBase × |degrees|) / 180
-       mmPerTick = (2π × wheelRadius) / 360
-       targetCounts = arcLength / mmPerTick
-    
-    2. If turning right (degrees > 0):
-       - Left wheel forward
-       - Right wheel stopped
-    
-    3. If turning left (degrees < 0):
-       - Left wheel stopped  
-       - Right wheel forward
-    
-    4. Wait until encoder count reaches target
-    5. Stop both motors
-```
-
-## Encoder-Based Speed Control
-
-Each wheel uses independent integral control:
+## Part A: Roll/Pitch Control Algorithm
 
 ```c
-Every 6 encoder pulses:
-    averageSpeed = sumOfLastSixPeriods / 6
+// Read compass pitch and roll
+pitch = readCompassRegister(4);  // -90° to +90°
+roll = readCompassRegister(5);   // -90° to +90°
+
+// Convert pitch to speed
+if (|pitch| < 5°):
+    desired_speed = 0
+else:
+    desired_speed = (pitch / 90) × 0.9
+
+// Convert roll to differential speed
+if (|roll| < 5°):
+    desired_diff_speed = 0  // Drive straight
+else:
+    desired_diff_speed = (roll / 90) × 0.9
+
+// Collision avoidance
+if (range < 25 cm AND moving forward):
+    desired_speed = 0
+
+// Calculate wheel speeds
+left_speed = desired_speed - desired_diff_speed
+right_speed = desired_speed + desired_diff_speed
+```
+
+## Part B: Heading-Based PD Control
+
+### Relative Heading Calculation
+The robot tracks its orientation using encoder measurements:
+
+```c
+// In encoder interrupt:
+if (motor_forward):
+    enc_counts_segment++
+else:
+    enc_counts_segment--
+
+// In main loop every 100ms:
+dist_left = enc_counts_left_segment × 0.611 mm
+dist_right = enc_counts_right_segment × 0.611 mm
+
+delta_theta = (dist_right - dist_left) / 149 mm
+measured_heading += delta_theta × (180/π)
+
+// Keep in 0-360° range
+while (measured_heading >= 360°): measured_heading -= 360°
+while (measured_heading < 0°): measured_heading += 360°
+
+// Reset segment counters
+enc_counts_left_segment = 0
+enc_counts_right_segment = 0
+```
+
+### PD Control for Turning
+
+```c
+// Read desired heading from hand-held compass
+desired_heading = compassHeading / 10.0  // Convert tenths to degrees
+
+// Calculate error with wrapping
+heading_error = desired_heading - measured_heading
+if (heading_error > 180°): heading_error -= 360°
+if (heading_error < -180°): heading_error += 360°
+
+// PD control
+heading_derivative = heading_error - heading_error_prev
+desired_diff_speed = Kp × heading_error + Kd × heading_derivative
+
+// Clamp differential speed
+if (desired_diff_speed > 0.9): desired_diff_speed = 0.9
+if (desired_diff_speed < -0.9): desired_diff_speed = -0.9
+
+heading_error_prev = heading_error
+```
+
+### Why Angle Wrapping is Critical
+
+Without wrapping:
+```
+desired = 350°, measured = 10°
+error = 350 - 10 = 340°  ❌ WRONG! (turns long way)
+
+With wrapping:
+error = 340° - 360° = -20°  ✅ CORRECT! (short turn)
+```
+
+## Debug Output (Parts A & B)
+
+```
+Mode:HEAD | P: 15 | R:  3 | H:1850 | MH:45.2 | Rng: 50 | Vd:0.15 | Vdiff:-0.05
+Mode:ROLL | P:-20 | R:-10 | H:1850 | MH:45.2 | Rng: 30 | Vd:-0.22 | Vdiff:-0.11
+```
+
+Shows:
+- **Mode**: ROLL or HEAD (heading control)
+- **P**: Pitch angle (degrees)
+- **R**: Roll angle (degrees)
+- **H**: Compass heading (tenths of degrees, 0-3599)
+- **MH**: Measured heading from encoders (degrees, 0-360)
+- **Rng**: Range to obstacle (cm)
+- **Vd**: Desired speed (duty cycle)
+- **Vdiff**: Differential speed (duty cycle)
+
+---
+
+# Part C: Autonomous Navigation
+
+Autonomous obstacle avoidance using ultrasonic ranging and intelligent turn strategy.
+
+## Hardware Requirements (Part C)
+
+- TI-RSLK Robotic Car
+- SRF08 Ultrasonic Ranger (I2C address: 0x70)
+- Push button (BMP1) for start trigger
+- No compass required
+
+## Features
+
+- **Automatic obstacle detection** at 25 cm
+- **Intelligent turn strategy**: Alternates left/right, increases turn angle
+- **Encoder-based turn precision**: No compass needed
+- **Dual-wheel speed control**: Maintains straight-line motion
+- **Systematic exploration**: Avoids getting stuck in corners
+
+## Control Specifications (Part C)
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Range Limit | 25 cm | Obstacle detection threshold |
+| Turn Angle | 60° | Default turn magnitude |
+| Turn Increment | 5° | Angle increase per direction change |
+| Wheel Base | 149 mm | Distance between wheels |
+| Turn PWM | 300 | 30% duty cycle during turns |
+| Speed Setpoint | 80,000 | Encoder period target |
+
+## Navigation Algorithm
+
+```
+Startup:
+    Wait for BMP1 button press
+    Initialize forward motion
+
+Main Loop:
+    Read ultrasonic range
     
-    if (averageSpeed > setpoint):
-        // Too fast - reduce PWM
-        currentPWM--
-    else if (averageSpeed < setpoint):
-        // Too slow - increase PWM
-        currentPWM++
+    If range < 25 cm:
+        Stop motors
+        
+        If completed 2 turns in current direction:
+            Reverse turn direction (left ↔ right)
+            Increase turn angle by 5°
+            Reset turn counter
+        
+        Pause 100ms
+        Execute turn (calculated from encoders)
+        Pause 1.5s
+        Increment turn counter
     
-    Apply new PWM value
+    Else:
+        Drive forward
+    
+    Update every 100ms
 ```
 
-**Key Feature**: Lower encoder period = faster wheel speed, so control is inverted compared to typical speed controllers.
-
-## Turn Geometry
-
-The robot uses differential drive kinematics:
+## Turn Pattern Example
 
 ```
-Arc Length = (π × wheelBase × θ) / 180°
-
-For 60° turn with 149mm wheel base:
-Arc Length = (π × 149 × 60) / 180 = 155.5 mm
-
-Encoder Counts = Arc Length / mmPerTick
-              = 155.5 / 0.611 ≈ 254 ticks
+Turn 1:  Right 60°
+Turn 2:  Right 60°  → Switch direction
+Turn 3:  Left -65°  (increased by 5°)
+Turn 4:  Left -65°  → Switch direction
+Turn 5:  Right 70°  (increased by 5°)
+Turn 6:  Right 70°  → Switch direction
+...and so on...
 ```
 
-Where:
-- `wheelBase = 149 mm` (measured between wheel centers)
-- `wheelRadius = 35 mm`
-- `mmPerTick = (2π × 35) / 360 = 0.611 mm`
+This creates systematic exploration and prevents loops.
+
+## Encoder-Based Turn Calculation
+
+```c
+// Arc length for turn angle
+arcLength = (π × wheelBase × |degrees|) / 180°
+          = (π × 149 × 60) / 180 = 155.5 mm
+
+// Distance per encoder tick
+mmPerTick = (2π × wheelRadius) / 360
+          = (2π × 35) / 360 = 0.611 mm
+
+// Target encoder counts
+targetCounts = arcLength / mmPerTick
+             = 155.5 / 0.611 ≈ 254 ticks
+
+// Execute turn:
+If turning right:
+    Left wheel on, right wheel off
+    Wait until enc_total_events ≥ targetCounts
+
+If turning left:
+    Right wheel on, left wheel off
+    Wait until enc_total_events ≥ targetCounts
+```
+
+## Debug Output (Part C)
+
+```
+RANGE: 045 | PWM_L: 800 | PWM_R: 795 | turnDirection: 60 RIGHT
+RANGE: 018 | PWM_L: 800 | PWM_R: 798 | turnDirection: 60 RIGHT
+
+TURNED RIGHT
+
+RANGE: 120 | PWM_L: 802 | PWM_R: 799 | turnDirection: -65 LEFT
+```
+
+---
+
+# Common Elements (All Parts)
 
 ## I2C Communication
 
-### SRF08 Ultrasonic Ranger
+### CMPS12 Compass (Parts A & B)
 ```c
-// Trigger new measurement
-command = 0x51  // Range in cm
-I2C_writeData(I2C1, 0x70, 0, &command, 1)
+// Read 4 bytes starting at register 2
+uint8_t data[4];
+I2C_readData(I2C1, 0x60, 2, data, 4);
 
-// Read previous result (after 80ms)
-I2C_readData(I2C1, 0x70, 2, data, 2)
-range = (data[0] << 8) | data[1]
+heading = (data[0] << 8) | data[1];  // 0-3599 (tenths of degrees)
+pitch = (int8_t)data[2];             // -90 to +90
+roll = (int8_t)data[3];              // -90 to +90
 ```
 
-**Important**: First reading after power-on is discarded (returns 0xFFFF)
+### SRF08 Ultrasonic Ranger (All Parts)
+```c
+// Trigger measurement
+uint8_t command = 0x51;  // Range in cm
+I2C_writeData(I2C1, 0x70, 0, &command, 1);
 
-## Navigation Behavior
-
-### Turn Pattern Example
-```
-Initial: Right turn (60°)
-Turn 1:  Right turn (60°)
-Turn 2:  Right turn (60°) → Switch direction
-Turn 3:  Left turn (-65°)  [increased by 5°]
-Turn 4:  Left turn (-65°)
-Turn 5:  Left turn (-65°) → Switch direction  
-Turn 6:  Right turn (70°)  [increased by 5°]
-...continues...
+// Wait 80ms, then read result
+uint8_t data[2];
+I2C_readData(I2C1, 0x70, 2, data, 2);
+range = (data[0] << 8) | data[1];
 ```
 
-This creates a systematic exploration pattern that prevents the robot from getting stuck in corners or loops.
+## Encoder-Based Speed Control (All Parts)
 
-## Debug Output
+Both wheels use identical integral control:
 
-Serial output (115200 baud) displays:
-```
-RANGE: 045 | PWM_L: 800 | PWM_R: 795 | turnDirection: 60 RIGHT
-```
+```c
+// Every 6 encoder events:
+averageSpeed = sumOfLast6Periods / 6
 
-Status updates every 100ms showing:
-- Current range measurement (cm)
-- Left wheel PWM value
-- Right wheel PWM value  
-- Turn direction and angle
+if (averageSpeed > setpoint):
+    currentPWM--  // Too fast, reduce PWM
+else if (averageSpeed < setpoint):
+    currentPWM++  // Too slow, increase PWM
 
-## Tuning Guide
-
-### Speed Control
-- Increase `SETPOINT` → slower robot
-- Decrease `SETPOINT` → faster robot
-- Adjust PWM limits (100-900) for min/max speed
-
-### Turn Precision
-- Verify `WHEEL_BASE` measurement (measure your robot!)
-- Verify `wheelRadius` (35mm is typical for RSLK)
-- Fine-tune `encoderCountsPerDegree` calculation if turns are consistently over/under
-
-### Turn Strategy
-- Modify `turnDirection` initial value (default: 60°)
-- Adjust angle increment (default: ±5°)
-- Change turn counter threshold (default: 2 turns before switch)
-
-### Range Detection
-- Modify `RANGE_LIMIT` (default: 25 cm)
-- Increase for more cautious navigation
-- Decrease for tighter spaces
-
-## Common Issues & Solutions
-
-**Issue**: Robot turns too far or not far enough
-- **Solution**: Verify wheel base measurement, check encoder connections
-
-**Issue**: Robot doesn't detect obstacles
-- **Solution**: Check I2C connections, verify SRF08 address (0x70), ensure 80ms delay between readings
-
-**Issue**: One wheel significantly faster than other
-- **Solution**: Check encoder connections, verify both speed controllers are active, ensure motors are enabled
-
-**Issue**: Robot gets stuck in corners
-- **Solution**: Increase turn angle, reduce number of turns before direction switch
-
-**Issue**: Encoder overflow (counts > 65535)
-- **Solution**: Already handled! Overflow tracking adds 65536 on timer reset
-
-## Project Structure
-
-```
-Lab5/
-├── main.c              # Complete navigation code
-├── engr2350_mspm0.h    # Hardware abstraction library  
-├── README.md           # This file
-└── .gitignore          # Git ignore file
+Apply new PWM value
 ```
 
-## Future Enhancements
+**Note**: Lower encoder period = faster speed (inverse relationship)
 
-Possible improvements for this design:
-- Add compass-based heading control (CMPS12)
-- Implement mapping of explored area
-- Add multiple ultrasonic sensors for 360° awareness
-- Optimize turn angles based on detected gap width
-- Add "stuck detection" using encoder monitoring
-- Implement return-to-start functionality
+## Tuning Guides
 
-## Course Information
+### Parts A & B: Gesture Control
+
+**Pitch/Roll sensitivity:**
+- Modify the `/90.0` divisor to change sensitivity
+- Smaller divisor = more sensitive (e.g., `/45.0`)
+- Larger divisor = less sensitive (e.g., `/120.0`)
+
+**PD Control (Part B):**
+1. Start with `Kp = 0.001`, `Kd = 0`
+2. Increase `Kp` until robot responds quickly but oscillates
+3. Increase `Kd` until oscillation stops
+4. Final values: `Kp = 0.03`, `Kd = 0.001`
+
+### Part C: Autonomous Navigation
+
+**Turn precision:**
+- Verify `WHEEL_BASE = 149 mm` (measure your robot!)
+- Adjust `turnDegrees` initial value for sharper/wider turns
+- Modify turn increment (default 5°)
+
+**Exploration pattern:**
+- Change turns-per-direction (default: 2)
+- Adjust initial `turnDirection` (default: 60°)
+
+---
+
+# Project Files
+
+## PartA_B_GestureControl.c
+Contains:
+- CMPS12 compass reading
+- Roll/pitch to speed conversion
+- Heading-based PD control
+- Mode switching logic
+- Encoder-based heading calculation
+- Collision avoidance
+
+## PartC_AutonomousNav.c  
+Contains:
+- Ultrasonic ranging
+- Turn execution with encoder feedback
+- Intelligent turn strategy
+- Speed control for straight driving
+- Start button logic
+
+---
+
+# Course Information
 
 - **Course**: ENGR-2350 Embedded Systems
-- **Lab**: Lab 5 - Autonomous Navigation Robot
-- **Authors**: Cori DeBeatham, Jun Iguchi
-- **RIN**: 662061765
+- **Lab**: Lab 5 - Gesture RC Car & Autonomous Navigation
+- **Authors**: Jun Iguchi
+- **RIN**: 662107130
 - **Institution**: Rensselaer Polytechnic Institute
 
 ## License
@@ -294,6 +422,6 @@ Educational use only - RPI ENGR-2350
 ## Acknowledgments
 
 - TI-RSLK robot platform
-- EmCon HAL library for MSPM0G3507
-- SRF08 ultrasonic ranger documentation
+- EmCon HAL library for MSPM0G3507  
+- CMPS12 compass and SRF08 ranger documentation
 - Course materials from RPI ENGR-2350
