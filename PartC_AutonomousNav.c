@@ -1,8 +1,5 @@
 /*
 Lab 5
-NAME: Cori DeBeatham, Jun Iguchi
-RIN: 662061765
-
 */
 
 #include "engr2350_mspm0.h"
