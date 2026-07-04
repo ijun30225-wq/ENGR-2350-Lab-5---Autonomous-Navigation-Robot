@@ -1,7 +1,5 @@
 ////////////////////////////////////////////////////////////////////////
 //** ENGR-2350 Lab 5: Gesture RC Car
-//** NAME: XXXX
-//** RIN: XXXX
 //** This lab implements gesture-based control using CMPS12 compass sensor
 //** Part A: Roll/Pitch control with ultrasonic collision avoidance
 //** Part B: Heading-based PD control with pitch speed control
