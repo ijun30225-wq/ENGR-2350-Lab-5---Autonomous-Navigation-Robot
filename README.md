@@ -412,7 +412,6 @@ Contains:
 - **Course**: ENGR-2350 Embedded Systems
 - **Lab**: Lab 5 - Gesture RC Car & Autonomous Navigation
 - **Authors**: Jun Iguchi
-- **RIN**: 662107130
 - **Institution**: Rensselaer Polytechnic Institute
 
 ## License
